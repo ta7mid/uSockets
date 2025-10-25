@@ -1,4 +1,6 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.12)
+# Determined by: https://cmake.org/cmake/help/latest/manual/cmake-generator-expressions.7.html#genex:TARGET_EXISTS
+
 project(uSockets VERSION 0.8.8 LANGUAGES C)
 
 #----------------------------------------------------------------
@@ -46,7 +48,6 @@ if((USE_GCD AND (USE_IO_URING OR USE_LIBUV OR USE_ASIO)) OR
     "  USE_ASIO:     $CACHE{USE_ASIO}"
   )
   message(FATAL_ERROR ${msg})
-  unset(msg)
 endif()
 
 if(ENABLE_SSL OR USE_ASIO)
@@ -63,13 +64,11 @@ endif()
 
 if(USE_GCD)
   if(NOT APPLE)
-    unset(USE_GCD)
     message(FATAL_ERROR "USE_GCD is valid only on macOS.")
   endif()
   set(eventloop_backend "GCD")
 elseif(USE_IO_URING)
   if(NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
-    unset(USE_IO_URING)
     message(FATAL_ERROR "USE_IO_URING is valid only on Linux.")
   endif()
   find_package(liburing REQUIRED)
@@ -96,77 +95,86 @@ endif()
 # Targets and properties
 #----------------------------------------------------------------
 
-add_library(uSockets STATIC
-  "src/libusockets.h"
-  "src/bsd.c"
-  "src/context.c"
-  "src/loop.c"
-  "src/socket.c"
-  "src/udp.c"
-  "src/internal/internal.h"
-  "src/internal/loop_data.h"
-  "src/internal/networking/bsd.h"
+include(GNUInstallDirs)
 
-  # SSL
-  "src/crypto/openssl.c"
-  "src/crypto/sni_tree.cpp"
-
-  # QUIC
-  "src/quic.h"
-  "src/quic.c"
-
-  # libdispatch
-  "src/internal/eventing/gcd.h"
-  "src/eventing/gcd.c"
-
-  # io_uring
-  "src/io_uring/internal.h"
-  "src/io_uring/io_context.c"
-  "src/io_uring/io_loop.c"
-  "src/io_uring/io_socket.c"
-
-  # Boost.Asio
-  "src/internal/eventing/asio.h"
-  "src/eventing/asio.cpp"
-
-  # direct syscalls on Unix
-  "src/internal/eventing/epoll_kqueue.h"
-  "src/eventing/epoll_kqueue.c"
-
-  # libuv
-  "src/internal/eventing/libuv.h"
-  "src/eventing/libuv.c"
+add_library(uSockets_uSockets STATIC)
+target_include_directories(uSockets_uSockets
+  PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
-set_target_properties(uSockets PROPERTIES "OUTPUT_NAME" "usockets")
-target_include_directories(uSockets PRIVATE "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>")
+target_sources(uSockets_uSockets
+  PUBLIC
+    "$<BUILD_INTERFACE:src/libusockets.h>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/libusockets.h>"
+  PRIVATE
+    "src/bsd.c"
+    "src/context.c"
+    "src/loop.c"
+    "src/socket.c"
+    "src/udp.c"
+    "src/internal/internal.h"
+    "src/internal/loop_data.h"
+    "src/internal/networking/bsd.h"
+    # SSL
+    "src/crypto/openssl.c"
+    "src/crypto/sni_tree.cpp"
+    # libdispatch
+    "src/eventing/gcd.c"
+    "src/internal/eventing/gcd.h"
+    # io_uring
+    "src/io_uring/internal.h"
+    "src/io_uring/io_context.c"
+    "src/io_uring/io_loop.c"
+    "src/io_uring/io_socket.c"
+    # Boost.Asio
+    "src/eventing/asio.cpp"
+    "src/internal/eventing/asio.h"
+    # direct syscalls on Unix
+    "src/eventing/epoll_kqueue.c"
+    "src/internal/eventing/epoll_kqueue.h"
+    # libuv
+    "src/eventing/libuv.c"
+    "src/internal/eventing/libuv.h"
+)
+if(ENABLE_QUIC)
+  target_sources(uSockets_uSockets
+    PUBLIC
+      "$<BUILD_INTERFACE:src/quic.h>"
+      "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/quic.h>"
+    PRIVATE
+      "src/quic.c"
+  )
+endif()
+
 # https://github.com/uNetworking/uSockets/blob/f0a52a0b8390d2c71c1dbefec3099b28d228f695/Makefile#L20
-target_compile_features(uSockets PRIVATE c_std_11)
+target_compile_features(uSockets_uSockets PRIVATE c_std_11)
 
 if(ENABLE_SSL)
-  target_compile_definitions(uSockets PUBLIC "LIBUS_USE_OPENSSL")
+  target_compile_definitions(uSockets_uSockets PUBLIC "LIBUS_USE_OPENSSL")
   # https://github.com/uNetworking/uSockets/blob/0ebdde0601cc82349fc11a7c4bbb6dc5c9f28f42/Makefile#L55
-  target_compile_features(uSockets PRIVATE cxx_std_17)
-  target_link_libraries(uSockets PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+  target_compile_features(uSockets_uSockets PRIVATE cxx_std_17)
+  target_link_libraries(uSockets_uSockets PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 else()
-  target_compile_definitions(uSockets PUBLIC "LIBUS_NO_SSL")
+  target_compile_definitions(uSockets_uSockets PUBLIC "LIBUS_NO_SSL")
 endif()
 
 if(ENABLE_QUIC)
-  target_compile_definitions(uSockets PUBLIC "LIBUS_USE_QUIC")
-  target_link_libraries(uSockets PRIVATE lsquic::lsquic)
+  target_compile_definitions(uSockets_uSockets PUBLIC "LIBUS_USE_QUIC")
+  target_link_libraries(uSockets_uSockets PRIVATE lsquic::lsquic)
 endif()
 
-target_compile_definitions(uSockets PUBLIC "LIBUS_USE_${eventloop_backend}")
+target_compile_definitions(uSockets_uSockets PUBLIC "LIBUS_USE_${eventloop_backend}")
 if("${eventloop_backend}" STREQUAL "IO_URING")
-  target_link_libraries(uSockets PRIVATE liburing::liburing)
+  target_link_libraries(uSockets_uSockets PRIVATE liburing::liburing)
 elseif("${eventloop_backend}" STREQUAL "ASIO")
-  target_compile_features(uSockets PRIVATE cxx_std_14)
-  target_link_libraries(uSockets PRIVATE Boost::asio)
+  target_compile_features(uSockets_uSockets PRIVATE cxx_std_14)
+  target_link_libraries(uSockets_uSockets PRIVATE Boost::asio)
 elseif("${eventloop_backend}" STREQUAL "LIBUV")
-  target_link_libraries(uSockets PRIVATE $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>)
+  target_link_libraries(uSockets_uSockets PRIVATE $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>)
   if(WIN32)
     # https://github.com/uNetworking/uSockets/blob/8606de6414a102c55bef8e8ef3391932d7e8df6a/src/libusockets.h#L35
-    target_link_libraries(uSockets PRIVATE ws2_32)
+    target_link_libraries(uSockets_uSockets PRIVATE ws2_32)
   endif()
 endif()
 
@@ -174,20 +182,19 @@ endif()
 # Installation
 #----------------------------------------------------------------
 
-include(GNUInstallDirs)
-
-install(FILES
-  "src/libusockets.h"
-  "$<$<BOOL:${ENABLE_QUIC}>:src/quic.h>"
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+set(exported_name "${PROJECT_NAME}")
+set_target_properties(uSockets_uSockets
+  PROPERTIES
+    OUTPUT_NAME "usockets"
+    EXPORT_NAME "${exported_name}"
 )
-target_include_directories(uSockets
-  INTERFACE "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+install(TARGETS uSockets_uSockets
+  EXPORT exported_targets
+  ARCHIVE  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
-
-install(TARGETS uSockets EXPORT uSocketsConfig)
-
-install(EXPORT uSocketsConfig
-  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/uSockets"
-  NAMESPACE "uSockets::"
+install(EXPORT exported_targets
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${exported_name}"
+  NAMESPACE "${exported_name}::"
+  FILE "${exported_name}Config.cmake"
 )
