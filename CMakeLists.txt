@@ -103,11 +103,12 @@ else() # use platform-specific defaults
   endif()
 endif()
 
+include(GNUInstallDirs)
+set(CMAKE_INSTALL_DOCDIR "${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}")
+
 #----------------------------------------------------------------
 # Targets and properties
 #----------------------------------------------------------------
-
-include(GNUInstallDirs)
 
 add_library(uSockets_uSockets STATIC)
 # https://github.com/uNetworking/uSockets/blob/f0a52a0b8390d2c71c1dbefec3099b28d228f695/Makefile#L20
@@ -165,11 +166,10 @@ if(ENABLE_QUIC)
   )
 endif()
 
-set(exported_name "${PROJECT_NAME}")
 set_target_properties(uSockets_uSockets
   PROPERTIES
-    OUTPUT_NAME "usockets"
-    EXPORT_NAME "${exported_name}"
+    OUTPUT_NAME   "usockets"
+    EXPORT_NAME   "${PROJECT_NAME}"
     PUBLIC_HEADER "${headers}"
 )
 
@@ -212,19 +212,26 @@ install(TARGETS uSockets_uSockets
   PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
 
-set(config_dest "${CMAKE_INSTALL_LIBDIR}/cmake/${exported_name}")
+set(config_dest "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
 
 install(EXPORT exported_targets
   DESTINATION "${config_dest}"
-  NAMESPACE "${exported_name}::"
-  FILE "${exported_name}Targets.cmake"
+  NAMESPACE   "${PROJECT_NAME}::"
+  FILE        "${PROJECT_NAME}Targets.cmake"
 )
 
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/${exported_name}Config.cmake"
-"include(CMakeFindDependencyMacro)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
+  "include(CMakeFindDependencyMacro)
 ${find_dependency_calls}
-include(\"\${CMAKE_CURRENT_LIST_DIR}/${exported_name}Targets.cmake\")
-")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${exported_name}Config.cmake"
+include(\"\${CMAKE_CURRENT_LIST_DIR}/${PROJECT_NAME}Targets.cmake\")"
+)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
   DESTINATION "${config_dest}"
+)
+
+install(FILES "README.md" "misc/manual.md" "misc/layout.png"
+  TYPE DOC
+)
+install(DIRECTORY "examples"
+  TYPE DOC
 )
