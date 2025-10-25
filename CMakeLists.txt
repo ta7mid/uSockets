@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.12)
-# Determined by: https://cmake.org/cmake/help/latest/manual/cmake-generator-expressions.7.html#genex:TARGET_EXISTS
+cmake_minimum_required(VERSION 3.15)
+# Determined by: https://cmake.org/cmake/help/latest/command/add_library.html#index-0-prop_tgt:PUBLIC_HEADER
 
 project(uSockets VERSION 0.8.8 LANGUAGES C)
 
@@ -54,30 +54,42 @@ if(ENABLE_SSL OR USE_ASIO)
   enable_language(CXX)
 endif()
 
+set(find_dependency_calls "")
+
 if(ENABLE_SSL)
   find_package(OpenSSL 1.1 REQUIRED)
+  string(APPEND find_dependency_calls "find_dependency(OpenSSL 1.1 REQUIRED)\n")
 endif()
 
 if(ENABLE_QUIC)
   find_package(lsquic REQUIRED)
+  string(APPEND find_dependency_calls "find_dependency(lsquic REQUIRED)\n")
 endif()
 
 if(USE_GCD)
   if(NOT APPLE)
     message(FATAL_ERROR "USE_GCD is valid only on macOS.")
   endif()
+
   set(eventloop_backend "GCD")
 elseif(USE_IO_URING)
   if(NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
     message(FATAL_ERROR "USE_IO_URING is valid only on Linux.")
   endif()
+
   find_package(liburing REQUIRED)
+  string(APPEND find_dependency_calls "find_dependency(liburing REQUIRED)\n")
+
   set(eventloop_backend "IO_URING")
 elseif(USE_ASIO)
   find_package(Boost 1.66 REQUIRED COMPONENTS asio)
+  string(APPEND find_dependency_calls "find_dependency(Boost 1.66 REQUIRED COMPONENTS asio)\n")
+
   set(eventloop_backend "ASIO")
 elseif(USE_LIBUV)
   find_package(libuv REQUIRED)
+  string(APPEND find_dependency_calls "find_dependency(libuv REQUIRED)\n")
+
   set(eventloop_backend "LIBUV")
 else() # use platform-specific defaults
   if("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
@@ -98,11 +110,16 @@ endif()
 include(GNUInstallDirs)
 
 add_library(uSockets_uSockets STATIC)
+# https://github.com/uNetworking/uSockets/blob/f0a52a0b8390d2c71c1dbefec3099b28d228f695/Makefile#L20
+target_compile_features(uSockets_uSockets PRIVATE c_std_11)
+
 target_include_directories(uSockets_uSockets
   PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
+
+set(headers "src/libusockets.h")
 target_sources(uSockets_uSockets
   PUBLIC
     "$<BUILD_INTERFACE:src/libusockets.h>"
@@ -138,6 +155,7 @@ target_sources(uSockets_uSockets
     "src/internal/eventing/libuv.h"
 )
 if(ENABLE_QUIC)
+  list(APPEND headers "src/quic.h")
   target_sources(uSockets_uSockets
     PUBLIC
       "$<BUILD_INTERFACE:src/quic.h>"
@@ -147,8 +165,13 @@ if(ENABLE_QUIC)
   )
 endif()
 
-# https://github.com/uNetworking/uSockets/blob/f0a52a0b8390d2c71c1dbefec3099b28d228f695/Makefile#L20
-target_compile_features(uSockets_uSockets PRIVATE c_std_11)
+set(exported_name "${PROJECT_NAME}")
+set_target_properties(uSockets_uSockets
+  PROPERTIES
+    OUTPUT_NAME "usockets"
+    EXPORT_NAME "${exported_name}"
+    PUBLIC_HEADER "${headers}"
+)
 
 if(ENABLE_SSL)
   target_compile_definitions(uSockets_uSockets PUBLIC "LIBUS_USE_OPENSSL")
@@ -174,7 +197,7 @@ elseif("${eventloop_backend}" STREQUAL "LIBUV")
   target_link_libraries(uSockets_uSockets PRIVATE $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>)
   if(WIN32)
     # https://github.com/uNetworking/uSockets/blob/8606de6414a102c55bef8e8ef3391932d7e8df6a/src/libusockets.h#L35
-    target_link_libraries(uSockets_uSockets PRIVATE ws2_32)
+    target_link_libraries(uSockets_uSockets PUBLIC ws2_32)
   endif()
 endif()
 
@@ -182,19 +205,26 @@ endif()
 # Installation
 #----------------------------------------------------------------
 
-set(exported_name "${PROJECT_NAME}")
-set_target_properties(uSockets_uSockets
-  PROPERTIES
-    OUTPUT_NAME "usockets"
-    EXPORT_NAME "${exported_name}"
-)
 install(TARGETS uSockets_uSockets
   EXPORT exported_targets
-  ARCHIVE  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-  INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  ARCHIVE       DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  INCLUDES      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
+
+set(config_dest "${CMAKE_INSTALL_LIBDIR}/cmake/${exported_name}")
+
 install(EXPORT exported_targets
-  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${exported_name}"
+  DESTINATION "${config_dest}"
   NAMESPACE "${exported_name}::"
-  FILE "${exported_name}Config.cmake"
+  FILE "${exported_name}Targets.cmake"
+)
+
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/${exported_name}Config.cmake"
+"include(CMakeFindDependencyMacro)
+${find_dependency_calls}
+include(\"\${CMAKE_CURRENT_LIST_DIR}/${exported_name}Targets.cmake\")
+")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${exported_name}Config.cmake"
+  DESTINATION "${config_dest}"
 )
