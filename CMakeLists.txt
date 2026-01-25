@@ -1,131 +1,135 @@
+# Minimum version determined by:
+# https://cmake.org/cmake/help/latest/command/add_library.html#index-0-prop_tgt:PUBLIC_HEADER
 cmake_minimum_required(VERSION 3.15)
-# Determined by: https://cmake.org/cmake/help/latest/command/add_library.html#index-0-prop_tgt:PUBLIC_HEADER
 
-project(uSockets VERSION 0.8.8 LANGUAGES C)
+project(uSockets
+  VERSION 0.8.8
+  LANGUAGES C
+  HOMEPAGE_URL "https://github.com/uNetworking/uSockets"
+)
+
+include(CMakePackageConfigHelpers)
+include(GNUInstallDirs)
+set(CMAKE_INSTALL_DOCDIR "${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}")
 
 #----------------------------------------------------------------
-# Options and dependencies
+# Define and validate build options
 #----------------------------------------------------------------
 
-# Create the options
-
-option(ENABLE_SSL "Enable SSL support" OFF)
-option(ENABLE_QUIC "Enable QUIC support using LiteSpeed QUIC" OFF)
+option(USOCKETS_ENABLE_SSL "Build with SSL/TLS support using OpenSSL or BoringSSL" OFF)
+option(USOCKETS_ENABLE_QUIC "Build with QUIC support using LiteSpeed QUIC" OFF)
 
 if(APPLE)
-  option(USE_GCD "Use libdispatch as the event-loop back end (macOS only)" OFF)
+  option(USOCKETS_USE_GCD "Use libdispatch as the event-loop back end (macOS only)" OFF)
+  set(default_is_libuv OFF)
 elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
-  option(USE_IO_URING "Use io_uring as the event-loop and networking back end (Linux only)" OFF)
+  option(USOCKETS_USE_IO_URING "Use io_uring as the event-loop and networking back end (Linux only)" OFF)
+  set(default_is_libuv OFF)
 else()
-  # https://github.com/uNetworking/uSockets/blob/8606de6414a102c55bef8e8ef3391932d7e8df6a/src/libusockets.h#L339-L348
-  set(libuv_is_default ON)
+  set(default_is_libuv ON)
 endif()
+option(USOCKETS_USE_LIBUV "Use libuv as the event-loop back end" "${default_is_libuv}")
+option(USOCKETS_USE_ASIO  "Use Boost.Asio as the event-loop back end" OFF)
 
-option(USE_LIBUV "Use libuv as the event-loop back end" $<BOOL:${libuv_is_default}>)
-option(USE_ASIO "Use Boost.Asio as the event-loop back end" OFF)
-
-# Validate options and make ependencies available
-
-if((USE_GCD AND (USE_IO_URING OR USE_LIBUV OR USE_ASIO)) OR
-    (USE_IO_URING AND (USE_LIBUV OR USE_ASIO)) OR
-    (USE_LIBUV AND USE_ASIO))
+# Validate option combinations and determine the event-loop back end
+if((USOCKETS_USE_GCD AND (USOCKETS_USE_IO_URING OR USOCKETS_USE_LIBUV OR USOCKETS_USE_ASIO)) OR
+    (USOCKETS_USE_IO_URING AND (USOCKETS_USE_LIBUV OR USOCKETS_USE_ASIO)) OR
+    (USOCKETS_USE_LIBUV AND USOCKETS_USE_ASIO))
   set(msg
     "Only one event-loop back end may be enabled.\n"
-    "Selection:\n"
+    "Current settings:\n"
   )
-  if(DEFINED CACHE{USE_GCD})
-    list(APPEND msg
-      "  USE_GCD:      $CACHE{USE_GCD}\n"
-    )
+  if(DEFINED CACHE{USOCKETS_USE_GCD})
+    list(APPEND msg "  USOCKETS_USE_GCD:      ${USOCKETS_USE_GCD}\n")
   endif()
-  if(DEFINED CACHE{USE_IO_URING})
-    list(APPEND msg
-      "  USE_IO_URING: $CACHE{USE_IO_URING}\n"
-    )
+  if(DEFINED CACHE{USOCKETS_USE_IO_URING})
+    list(APPEND msg "  USOCKETS_USE_IO_URING: ${USOCKETS_USE_IO_URING}\n")
   endif()
   list(APPEND msg
-    "  USE_LIBUV:    $CACHE{USE_LIBUV}\n"
-    "  USE_ASIO:     $CACHE{USE_ASIO}"
+    "  USOCKETS_USE_LIBUV:    ${USOCKETS_USE_LIBUV}\n"
+    "  USOCKETS_USE_ASIO:     ${USOCKETS_USE_ASIO}"
   )
   message(FATAL_ERROR ${msg})
-endif()
-
-if(ENABLE_SSL OR USE_ASIO)
-  enable_language(CXX)
-endif()
-
-set(find_dependency_calls "")
-
-if(ENABLE_SSL)
-  find_package(OpenSSL 1.1 REQUIRED)
-  string(APPEND find_dependency_calls "find_dependency(OpenSSL 1.1 REQUIRED)\n")
-endif()
-
-if(ENABLE_QUIC)
-  find_package(lsquic REQUIRED)
-  string(APPEND find_dependency_calls "find_dependency(lsquic REQUIRED)\n")
-endif()
-
-if(USE_GCD)
+elseif(USOCKETS_USE_GCD)
   if(NOT APPLE)
-    message(FATAL_ERROR "USE_GCD is valid only on macOS.")
+    message(FATAL_ERROR
+      "libdispatch cannot be used on this OS; USOCKETS_USE_GCD=${USOCKETS_USE_GCD} is valid\n"
+      "only on macOS."
+    )
   endif()
-
   set(eventloop_backend "GCD")
-elseif(USE_IO_URING)
+elseif(USOCKETS_USE_IO_URING)
   if(NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
-    message(FATAL_ERROR "USE_IO_URING is valid only on Linux.")
+    message(FATAL_ERROR
+      "io_uring cannot be used on this OS; USOCKETS_USE_IO_URING=${USOCKETS_USE_IO_URING} is valid\n"
+      "only on Linux."
+    )
   endif()
-
-  find_package(liburing REQUIRED)
-  string(APPEND find_dependency_calls "find_dependency(liburing REQUIRED)\n")
-
   set(eventloop_backend "IO_URING")
-elseif(USE_ASIO)
-  find_package(Boost 1.66 REQUIRED COMPONENTS asio)
-  string(APPEND find_dependency_calls "find_dependency(Boost 1.66 REQUIRED COMPONENTS asio)\n")
-
+elseif(USOCKETS_USE_ASIO)
   set(eventloop_backend "ASIO")
-elseif(USE_LIBUV)
-  find_package(libuv REQUIRED)
-  string(APPEND find_dependency_calls "find_dependency(libuv REQUIRED)\n")
-
+elseif(USOCKETS_USE_LIBUV)
   set(eventloop_backend "LIBUV")
-else() # use platform-specific defaults
+else() # Use platform-specific defaults
   if("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
     set(eventloop_backend "EPOLL")
   elseif(UNIX) # macOS and FreeBSD
     set(eventloop_backend "KQUEUE")
   else() # Windows and others
-    message(FATAL_ERROR
-      "One of libuv or Boost.Asio must be enabled on this platform; the default is libuv."
-    )
+    message(FATAL_ERROR "This OS must use libuv (default) or Boost.Asio.")
   endif()
 endif()
 
-include(GNUInstallDirs)
-set(CMAKE_INSTALL_DOCDIR "${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}")
-
 #----------------------------------------------------------------
-# Targets and properties
+# Find dependencies
 #----------------------------------------------------------------
 
-add_library(uSockets_uSockets STATIC)
-# https://github.com/uNetworking/uSockets/blob/f0a52a0b8390d2c71c1dbefec3099b28d228f695/Makefile#L20
-target_compile_features(uSockets_uSockets PRIVATE c_std_11)
+if(USOCKETS_ENABLE_SSL OR USOCKETS_USE_ASIO)
+  enable_language(CXX)
+endif()
 
-target_include_directories(uSockets_uSockets
-  PUBLIC
-    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
-    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+if(USOCKETS_ENABLE_SSL)
+  if(NOT BUILD_SHARED_LIBS)
+    set(OPENSSL_USE_STATIC_LIBS ON)
+  endif()
+  find_package(OpenSSL 1.1 REQUIRED COMPONENTS SSL)
+endif()
+
+if(USOCKETS_ENABLE_QUIC)
+  find_package(lsquic REQUIRED)
+endif()
+
+if(USOCKETS_USE_IO_URING)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(liburing REQUIRED IMPORTED_TARGET liburing)
+elseif(USOCKETS_USE_ASIO)
+  if(NOT BUILD_SHARED_LIBS)
+    set(Boost_USE_STATIC_LIBS ON)
+  endif()
+
+  # Using v1.69 because since that version Boost.Asio is fully header-only and does not
+  # require linking with other Boost libraries
+  find_package(Boost 1.69 REQUIRED)
+elseif(USOCKETS_USE_LIBUV)
+  find_package(libuv REQUIRED)
+endif()
+
+#----------------------------------------------------------------
+# Define build targets
+#----------------------------------------------------------------
+
+# Verbose name to reduce chances of conflicts when this project is included as a
+# subdirectory in another project
+add_library(unetworking_usockets)
+target_compile_features(unetworking_usockets PRIVATE c_std_11)
+target_include_directories(unetworking_usockets
+  PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
+  # An `INSTALL_INTERFACE` counterpart is not needed because the `install(TARGETS)` call below with
+  # the `INCLUDES DESTINATION` argument will set the install-time `INTERFACE_INCLUDE_DIRECTORIES`.
 )
-
-set(headers "src/libusockets.h")
-target_sources(uSockets_uSockets
-  PUBLIC
-    "$<BUILD_INTERFACE:src/libusockets.h>"
-    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/libusockets.h>"
+target_sources(unetworking_usockets
   PRIVATE
+    "src/libusockets.h"
     "src/bsd.c"
     "src/context.c"
     "src/loop.c"
@@ -135,103 +139,134 @@ target_sources(uSockets_uSockets
     "src/internal/loop_data.h"
     "src/internal/networking/bsd.h"
     # SSL
-    "src/crypto/openssl.c"
-    "src/crypto/sni_tree.cpp"
+    "$<$<BOOL:${USOCKETS_ENABLE_SSL}>:src/crypto/openssl.c>"
+    "$<$<BOOL:${USOCKETS_ENABLE_SSL}>:src/crypto/sni_tree.cpp>"
+    # QUIC
+    "$<$<BOOL:${USOCKETS_ENABLE_QUIC}>:src/quic.h>"
+    "$<$<BOOL:${USOCKETS_ENABLE_QUIC}>:src/quic.c>"
+    # direct syscalls on Unix (epoll/kqueue)
+    "$<$<OR:$<STREQUAL:${eventloop_backend},EPOLL>,$<STREQUAL:${eventloop_backend},KQUEUE>>:src/internal/eventing/epoll_kqueue.h>"
+    "$<$<OR:$<STREQUAL:${eventloop_backend},EPOLL>,$<STREQUAL:${eventloop_backend},KQUEUE>>:src/eventing/epoll_kqueue.c>"
     # libdispatch
-    "src/eventing/gcd.c"
-    "src/internal/eventing/gcd.h"
+    "$<$<STREQUAL:${eventloop_backend},GCD>:src/internal/eventing/gcd.h>"
+    "$<$<STREQUAL:${eventloop_backend},GCD>:src/eventing/gcd.c>"
     # io_uring
-    "src/io_uring/internal.h"
-    "src/io_uring/io_context.c"
-    "src/io_uring/io_loop.c"
-    "src/io_uring/io_socket.c"
+    "$<$<STREQUAL:${eventloop_backend},IO_URING>:src/io_uring/internal.h>"
+    "$<$<STREQUAL:${eventloop_backend},IO_URING>:src/io_uring/io_context.c>"
+    "$<$<STREQUAL:${eventloop_backend},IO_URING>:src/io_uring/io_loop.c>"
+    "$<$<STREQUAL:${eventloop_backend},IO_URING>:src/io_uring/io_socket.c>"
     # Boost.Asio
-    "src/eventing/asio.cpp"
-    "src/internal/eventing/asio.h"
-    # direct syscalls on Unix
-    "src/eventing/epoll_kqueue.c"
-    "src/internal/eventing/epoll_kqueue.h"
+    "$<$<STREQUAL:${eventloop_backend},ASIO>:src/internal/eventing/asio.h>"
+    "$<$<STREQUAL:${eventloop_backend},ASIO>:src/eventing/asio.cpp>"
     # libuv
-    "src/eventing/libuv.c"
-    "src/internal/eventing/libuv.h"
+    "$<$<STREQUAL:${eventloop_backend},LIBUV>:src/internal/eventing/libuv.h>"
+    "$<$<STREQUAL:${eventloop_backend},LIBUV>:src/eventing/libuv.c>"
 )
-if(ENABLE_QUIC)
-  list(APPEND headers "src/quic.h")
-  target_sources(uSockets_uSockets
-    PUBLIC
-      "$<BUILD_INTERFACE:src/quic.h>"
-      "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/quic.h>"
-    PRIVATE
-      "src/quic.c"
-  )
+list(APPEND public_headers "src/libusockets.h")
+if(USOCKETS_ENABLE_QUIC)
+  list(APPEND public_headers "src/quic.h")
 endif()
 
-set_target_properties(uSockets_uSockets
+set_target_properties(unetworking_usockets
   PROPERTIES
-    OUTPUT_NAME   "usockets"
-    EXPORT_NAME   "${PROJECT_NAME}"
-    PUBLIC_HEADER "${headers}"
+    PUBLIC_HEADER "${public_headers}"
+    OUTPUT_NAME usockets
+
+    COMPATIBLE_INTERFACE_BOOL "SSL_SUPPORT;QUIC_SUPPORT"
+    INTERFACE_SSL_SUPPORT     "${USOCKETS_ENABLE_SSL}"
+    INTERFACE_QUIC_SUPPORT    "${USOCKETS_ENABLE_QUIC}"
+
+    COMPATIBLE_INTERFACE_STRING  "EVENT_LOOP_BACKEND"
+    INTERFACE_EVENT_LOOP_BACKEND "${eventloop_backend}"
 )
-
-if(ENABLE_SSL)
-  target_compile_definitions(uSockets_uSockets PUBLIC "LIBUS_USE_OPENSSL")
-  # https://github.com/uNetworking/uSockets/blob/0ebdde0601cc82349fc11a7c4bbb6dc5c9f28f42/Makefile#L55
-  target_compile_features(uSockets_uSockets PRIVATE cxx_std_17)
-  target_link_libraries(uSockets_uSockets PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+if(BUILD_SHARED_LIBS)
+  set_target_properties(unetworking_usockets
+    PROPERTIES
+      EXPORT_NAME usockets_shared
+      SOVERSION "${PROJECT_VERSION_MAJOR}"
+      VERSION   "${PROJECT_VERSION}"
+  )
+  set(linkage_type "shared")
 else()
-  target_compile_definitions(uSockets_uSockets PUBLIC "LIBUS_NO_SSL")
+  set_target_properties(unetworking_usockets
+    PROPERTIES
+      EXPORT_NAME usockets_static
+      POSITION_INDEPENDENT_CODE ON
+  )
+  set(linkage_type "static")
 endif()
 
-if(ENABLE_QUIC)
-  target_compile_definitions(uSockets_uSockets PUBLIC "LIBUS_USE_QUIC")
-  target_link_libraries(uSockets_uSockets PRIVATE lsquic::lsquic)
+if(WIN32)
+  target_link_libraries(unetworking_usockets PUBLIC ws2_32)
 endif()
 
-target_compile_definitions(uSockets_uSockets PUBLIC "LIBUS_USE_${eventloop_backend}")
+if(USOCKETS_ENABLE_SSL)
+  target_compile_features(unetworking_usockets PRIVATE cxx_std_17)
+  target_compile_definitions(unetworking_usockets PUBLIC "LIBUS_USE_OPENSSL")
+  target_link_libraries(unetworking_usockets PRIVATE OpenSSL::SSL)
+else()
+  target_compile_definitions(unetworking_usockets PUBLIC "LIBUS_NO_SSL")
+endif()
+
+if(USOCKETS_ENABLE_QUIC)
+  target_compile_definitions(unetworking_usockets PUBLIC "LIBUS_USE_QUIC")
+  target_link_libraries(unetworking_usockets PRIVATE lsquic::lsquic)
+endif()
+
+target_compile_definitions(unetworking_usockets PUBLIC "LIBUS_USE_${eventloop_backend}")
 if("${eventloop_backend}" STREQUAL "IO_URING")
-  target_link_libraries(uSockets_uSockets PRIVATE liburing::liburing)
+  target_link_libraries(unetworking_usockets PRIVATE PkgConfig::liburing)
 elseif("${eventloop_backend}" STREQUAL "ASIO")
-  target_compile_features(uSockets_uSockets PRIVATE cxx_std_14)
-  target_link_libraries(uSockets_uSockets PRIVATE Boost::asio)
+  if(NOT USOCKETS_ENABLE_SSL)
+    target_compile_features(unetworking_usockets PRIVATE cxx_std_14)
+  endif()
+  target_link_libraries(unetworking_usockets PRIVATE Boost::headers)
 elseif("${eventloop_backend}" STREQUAL "LIBUV")
-  target_link_libraries(uSockets_uSockets PRIVATE $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>)
-  if(WIN32)
-    # https://github.com/uNetworking/uSockets/blob/8606de6414a102c55bef8e8ef3391932d7e8df6a/src/libusockets.h#L35
-    target_link_libraries(uSockets_uSockets PUBLIC ws2_32)
+  if(BUILD_SHARED_LIBS)
+    target_link_libraries(unetworking_usockets PRIVATE libuv::uv)
+  else()
+    target_link_libraries(unetworking_usockets PRIVATE libuv::uv_a)
   endif()
 endif()
 
 #----------------------------------------------------------------
-# Installation
+# Define export and install rules
 #----------------------------------------------------------------
 
-install(TARGETS uSockets_uSockets
-  EXPORT exported_targets
-  ARCHIVE       DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-  INCLUDES      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+set(package_name "${PROJECT_NAME}")
+set(config_install_dir "${CMAKE_INSTALL_LIBDIR}/cmake/${package_name}")
+set(export_set_name "${package_name}Targets-${linkage_type}")
+
+configure_file("cmake/uSocketsConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/${package_name}Config.cmake"
+  @ONLY
+)
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/${package_name}ConfigVersion.cmake"
+  COMPATIBILITY AnyNewerVersion
+)
+
+install(TARGETS unetworking_usockets
+  EXPORT "${export_set_name}"
+  INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
 )
-
-set(config_dest "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
-
-install(EXPORT exported_targets
-  DESTINATION "${config_dest}"
-  NAMESPACE   "${PROJECT_NAME}::"
-  FILE        "${PROJECT_NAME}Targets.cmake"
+install(EXPORT "${export_set_name}"
+  DESTINATION "${config_install_dir}"
+  NAMESPACE "${package_name}::"
 )
-
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
-  "include(CMakeFindDependencyMacro)
-${find_dependency_calls}
-include(\"\${CMAKE_CURRENT_LIST_DIR}/${PROJECT_NAME}Targets.cmake\")"
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/${package_name}Config.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/${package_name}ConfigVersion.cmake"
+  DESTINATION "${config_install_dir}"
 )
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
-  DESTINATION "${config_dest}"
-)
-
-install(FILES "README.md" "misc/manual.md" "misc/layout.png"
+install(FILES
+    "README.md"
+    "misc/manual.md"
+    "misc/layout.png"
   TYPE DOC
 )
-install(DIRECTORY "examples"
-  TYPE DOC
-)
+install(DIRECTORY "examples" TYPE DOC)
