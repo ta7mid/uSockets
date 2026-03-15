@@ -2,14 +2,19 @@
 # https://cmake.org/cmake/help/latest/command/add_library.html#index-0-prop_tgt:PUBLIC_HEADER
 cmake_minimum_required(VERSION 3.15)
 
-project(uSockets VERSION "0.8.8" LANGUAGES C HOMEPAGE_URL "https://github.com/uNetworking/uSockets")
+project(
+  uSockets
+  VERSION "0.8.8"
+  LANGUAGES C
+  HOMEPAGE_URL "https://github.com/uNetworking/uSockets"
+)
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 set(CMAKE_INSTALL_DOCDIR "${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}")
 
 #----------------------------------------------------------------
-# Define and validate build options
+# Declare and validate configuration options
 #----------------------------------------------------------------
 
 option(USOCKETS_ENABLE_SSL "Build with SSL/TLS support using OpenSSL or BoringSSL" OFF)
@@ -54,8 +59,8 @@ elseif(USOCKETS_USE_GCD)
   if(NOT APPLE)
     message(
       FATAL_ERROR
-      "libdispatch cannot be used on this OS; USOCKETS_USE_GCD=${USOCKETS_USE_GCD} is valid\n"
-      "only on macOS."
+      "libdispatch cannot be used on this OS.\n"
+      "USOCKETS_USE_GCD=\"${USOCKETS_USE_GCD}\" is valid on macOS only."
     )
   endif()
   set(eventloop_backend GCD)
@@ -63,8 +68,8 @@ elseif(USOCKETS_USE_IO_URING)
   if(NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
     message(
       FATAL_ERROR
-      "io_uring cannot be used on this OS; USOCKETS_USE_IO_URING=${USOCKETS_USE_IO_URING} is valid\n"
-      "only on Linux."
+      "io_uring cannot be used on this OS.\n"
+      "USOCKETS_USE_IO_URING=\"${USOCKETS_USE_IO_URING}\" is valid on Linux only."
     )
   endif()
   set(eventloop_backend IO_URING)
@@ -108,8 +113,8 @@ elseif(USOCKETS_USE_ASIO)
   if(NOT BUILD_SHARED_LIBS)
     set(Boost_USE_STATIC_LIBS ON)
   endif()
-  # Using v1.69 because since that version Boost.Asio is fully header-only and does not
-  # require linking with other Boost libraries
+  # Using v1.69 because from this version onwards Boost.Asio is fully header-only and
+  # does not require linking with other Boost libraries
   find_package(Boost 1.69 REQUIRED)
 elseif(USOCKETS_USE_LIBUV)
   find_package(libuv REQUIRED)
@@ -194,7 +199,9 @@ if(BUILD_SHARED_LIBS)
 else()
   set_target_properties(
     unetworking_usockets
-    PROPERTIES EXPORT_NAME usockets_static POSITION_INDEPENDENT_CODE ON
+    PROPERTIES
+      EXPORT_NAME usockets_static
+      POSITION_INDEPENDENT_CODE ON
   )
 endif()
 
@@ -238,7 +245,11 @@ endif()
 set(package_name "${PROJECT_NAME}")
 set(config_install_dir "${CMAKE_INSTALL_LIBDIR}/cmake/${package_name}")
 set(exports_name_prefix "${package_name}Targets") # used also in the config package input file
-set(exports_name "${exports_name_prefix}-$<IF:$<BOOL:BUILD_SHARED_LIBS>,shared,static>")
+if(BUILD_SHARED_LIBS)
+  set(exports_name "${exports_name_prefix}-shared")
+else()
+  set(exports_name "${exports_name_prefix}-static")
+endif()
 
 configure_file(
   "cmake/uSocketsConfig.cmake.in"
@@ -248,6 +259,12 @@ configure_file(
 write_basic_package_version_file(
   "${CMAKE_CURRENT_BINARY_DIR}/${package_name}ConfigVersion.cmake"
   COMPATIBILITY AnyNewerVersion
+)
+install(
+  FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/${package_name}Config.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/${package_name}ConfigVersion.cmake"
+  DESTINATION "${config_install_dir}"
 )
 
 install(
@@ -264,11 +281,6 @@ install(
   DESTINATION "${config_install_dir}"
   NAMESPACE "${package_name}::"
 )
-install(
-  FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/${package_name}Config.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/${package_name}ConfigVersion.cmake"
-  DESTINATION "${config_install_dir}"
-)
+
 install(FILES "misc/manual.md" "misc/layout.png" TYPE DOC)
 install(DIRECTORY "examples" TYPE DOC)
