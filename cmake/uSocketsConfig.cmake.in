@@ -1,28 +1,41 @@
+include(CMakeFindDependencyMacro)
+
 if(@USOCKETS_ENABLE_SSL@)
-  find_package(OpenSSL 1.1 QUIET REQUIRED COMPONENTS SSL)
+  find_dependency(OpenSSL 1.1 COMPONENTS SSL)
 endif()
 
 if(@USOCKETS_ENABLE_QUIC@)
-  find_package(lsquic QUIET REQUIRED)
+  find_dependency(lsquic)
 endif()
 
 if("@eventloop_backend@" STREQUAL "IO_URING")
   # Version 3.7 is required for the `IMPORTED_TARGET` argument of `pkg_check_modules`
   if(CMAKE_VERSION VERSION_LESS "3.7")
-     set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE "CMake >= 3.7 is required to find liburing using PkgConfig.")
-     set(${CMAKE_FIND_PACKAGE_NAME}_FOUND 0)
-     return()
+    set(
+      ${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE
+      "CMake >= 3.7 is required to find liburing using PkgConfig."
+    )
+    set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
+    return()
   endif()
-  find_package(PkgConfig QUIET REQUIRED)
-  pkg_check_modules(liburing QUIET REQUIRED IMPORTED_TARGET liburing)
+  find_dependency(PkgConfig QUIET MODULE REQUIRED)
+  pkg_check_modules(liburing IMPORTED_TARGET liburing)
 elseif("@eventloop_backend@" STREQUAL "ASIO")
-  find_package(Boost 1.69 QUIET REQUIRED)
+  find_dependency(Boost 1.69)
 elseif("@eventloop_backend@" STREQUAL "LIBUV")
-  find_package(libuv QUIET REQUIRED)
+  find_dependency(libuv)
 endif()
 
-include("${CMAKE_CURRENT_LIST_DIR}/@package_name@Targets-static.cmake" OPTIONAL RESULT_VARIABLE _found_static)
-include("${CMAKE_CURRENT_LIST_DIR}/@package_name@Targets-shared.cmake" OPTIONAL RESULT_VARIABLE _found_shared)
+include(
+  "${CMAKE_CURRENT_LIST_DIR}/@exports_name_prefix@-static.cmake"
+  OPTIONAL
+  RESULT_VARIABLE _found_static
+)
+include(
+  "${CMAKE_CURRENT_LIST_DIR}/@exports_name_prefix@-shared.cmake"
+  OPTIONAL
+  RESULT_VARIABLE _found_shared
+)
 if(NOT _found_static AND NOT _found_shared)
-  set(${CMAKE_FIND_PACKAGE_NAME}_FOUND 0)
+  set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
 endif()
